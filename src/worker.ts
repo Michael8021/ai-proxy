@@ -17,6 +17,34 @@ app.use(async (c, next) => {
 
 app.get("/", (c) => c.text("A proxy for AI! (Cloudflare Workers)"))
 
+const fetchWithTimeout = async (
+  url: string,
+  { timeout, ...options }: RequestInit & { timeout: number },
+) => {
+  const controller = new AbortController()
+
+  const timeoutId = setTimeout(() => {
+    controller.abort()
+  }, timeout)
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    return res
+  } catch (error) {
+    clearTimeout(timeoutId)
+    if (controller.signal.aborted) {
+      return new Response("Request timeout", {
+        status: 504,
+      })
+    }
+    throw error
+  }
+}
+
 const proxies: { pathSegment: string; target: string; orHostname?: string }[] =
   [
     {
@@ -122,10 +150,11 @@ app.all("*", async (c) => {
     )}${url.search}`
 
     try {
-      const res = await fetch(targetUrl, {
+      const res = await fetchWithTimeout(targetUrl, {
         method: c.req.method,
         headers,
         body: c.req.raw.body,
+        timeout: 60000, // 60 seconds
       })
 
       return new Response(res.body, {
