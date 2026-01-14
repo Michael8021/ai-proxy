@@ -5,12 +5,17 @@
   "scripts": {
     "start": "node ./dist/server.js",
     "dev": "bunx tsx --watch ./server.ts",
-    "build": "bun build ./server.ts ./main.ts --outdir dist --packages external"
+    "build": "bun build ./server.ts ./main.ts --outdir dist --packages external",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "prettier": "^3.5.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^3.99.0",
+    "@cloudflare/workers-types": "^4.20241224.0"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.0",
