@@ -3,6 +3,7 @@ import { cors } from "hono/cors"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { logger } from "hono/logger"
+import { proxy } from "hono/proxy"
 
 const app = new Hono()
 
@@ -15,7 +16,7 @@ app.use(async (c, next) => {
   c.res.headers.set("X-Accel-Buffering", "no")
 })
 
-app.get("/", (c) => c.text("A proxy for AI! (Cloudflare Workers)"))
+app.get("/", (c) => c.text("A proxy for AI!"))
 
 const fetchWithTimeout = async (
   url: string,
@@ -28,9 +29,11 @@ const fetchWithTimeout = async (
   }, timeout)
 
   try {
-    const res = await fetch(url, {
+    const res = await proxy(url, {
       ...options,
       signal: controller.signal,
+      // @ts-expect-error
+      duplex: "half",
     })
     clearTimeout(timeoutId)
     return res
@@ -41,6 +44,7 @@ const fetchWithTimeout = async (
         status: 504,
       })
     }
+
     throw error
   }
 }
@@ -105,7 +109,7 @@ app.post(
   async (c) => {
     const { url } = c.req.valid("query")
 
-    const res = await fetch(url, {
+    const res = await proxy(url, {
       method: c.req.method,
       body: c.req.raw.body,
       headers: c.req.raw.headers,
@@ -118,18 +122,18 @@ app.post(
   },
 )
 
-app.all("*", async (c) => {
+app.use(async (c, next) => {
   const url = new URL(c.req.url)
 
-  const proxyConfig = proxies.find(
+  const proxy = proxies.find(
     (p) =>
       url.pathname.startsWith(`/${p.pathSegment}/`) ||
       (p.orHostname && url.hostname === p.orHostname),
   )
 
-  if (proxyConfig) {
+  if (proxy) {
     const headers = new Headers()
-    headers.set("host", new URL(proxyConfig.target).hostname)
+    headers.set("host", new URL(proxy.target).hostname)
 
     c.req.raw.headers.forEach((value, key) => {
       const k = key.toLowerCase()
@@ -144,29 +148,25 @@ app.all("*", async (c) => {
       }
     })
 
-    const targetUrl = `${proxyConfig.target}${url.pathname.replace(
-      `/${proxyConfig.pathSegment}/`,
+    const targetUrl = `${proxy.target}${url.pathname.replace(
+      `/${proxy.pathSegment}/`,
       "/",
     )}${url.search}`
 
-    try {
-      const res = await fetchWithTimeout(targetUrl, {
-        method: c.req.method,
-        headers,
-        body: c.req.raw.body,
-        timeout: 60000, // 60 seconds
-      })
+    const res = await fetchWithTimeout(targetUrl, {
+      method: c.req.method,
+      headers,
+      body: c.req.raw.body,
+      timeout: 60000,
+    })
 
-      return new Response(res.body, {
-        headers: res.headers,
-        status: res.status,
-      })
-    } catch (error) {
-      return new Response("Proxy error", { status: 502 })
-    }
+    return new Response(res.body, {
+      headers: res.headers,
+      status: res.status,
+    })
   }
 
-  return c.text("Not Found", 404)
+  next()
 })
 
 export default app
